@@ -1,0 +1,87 @@
+# Cloud Site variables
+$cloudlocation = 'uksouth'
+$cloudrgname = 'S2S-CLOUD'
+$cloudvnetname = 'CLOUD-VNET'
+$cloudvnetaddress = '10.10.0.0/16'
+$cloudmgmtsubnetname = 'MGMT-SUBNET'
+$cloudmgmtsubnetaddress = '10.10.1.0/24'
+$cloudgatewaysubnetaddress = '10.10.0.0/24'
+$cloudbastionsubnetaddress = '10.10.250.0/24'
+$cloudgatewayname = 'CLOUD-GATEWAY'
+$cloudvm1name = 'CLOUD-WINVM'
+$cloudvm2name = 'CLOUD-LINVM'
+#On-Prem Site variables
+$onpremlocation = 'ukwest'
+$onpremrgname = 'S2S-ONPREM'
+$onpremvnetname = 'ONPREM-VNET'
+$onpremvnetaddress = '192.168.0.0/16'
+$onpremlansubnet = 'LAN-SUBNET'
+$onpremlansubnetaddress = '192.168.1.0/24'
+$onpremlansubnetname = 'DMZ-SUBNET'
+$onpremdmzsubnetaddress = '192.168.0.0/24'
+$onpremgatewayname = 'ONPREM-GATEWAY'
+$onpremvm1name = 'ONPREM-WINVM'
+$onpremvm2name = 'ONPREM-LINVM'
+$adminusername = 'adminuser'
+$adminpasswd = "P@ssw0rd#123!"
+# Resource Groups
+az group create --location $cloudlocation --name $cloudrgname --tags "Scenario=S2S"
+az group create --location $onpremlocation --name $onpremrgname --tags "Scenario=S2S"
+# CLOUD-VNET
+az network vnet create --resource-group $cloudrgname --name $cloudvnetname --address-prefixes $cloudvnetaddress --subnet-name $cloudmgmtsubnetname --subnet-prefixes $cloudmgmtsubnetaddress --tags "Scenario=S2S"
+az network vnet subnet create --address-prefixes $cloudgatewaysubnetaddress --name GatewaySubnet --resource-group $cloudrgname --vnet-name $cloudvnetname
+#CLOUD-NSG
+az network nsg create --name CLOUD-NSG --resource-group $cloudrgname
+az network nsg rule create --name Allow_SSH --nsg-name CLOUD-NSG --resource-group $cloudrgname --priority 100 --access Allow --protocol Tcp --source-address-prefixes * --destination-address-prefixes * --destination-port-ranges 22
+az network nsg rule create --name Allow_RDP --nsg-name CLOUD-NSG --resource-group $cloudrgname --priority 101 --access Allow --protocol Tcp --source-address-prefixes * --destination-address-prefixes * --destination-port-ranges 3389
+az network vnet subnet update --name $cloudmgmtsubnetname --resource-group  $cloudrgname --vnet-name $cloudvnetname --nsg CLOUD-NSG
+# CLOUD VPN GATEWAY
+az network public-ip create --name "$cloudgatewayname-PUBIP" --resource-group $cloudrgname --allocation-method Dynamic --sku Basic --tags "Scenario=S2S"
+az network vnet-gateway create --name $cloudgatewayname --public-ip-addresses "$cloudgatewayname-PUBIP" --resource-group $cloudrgname --vnet $cloudvnetname --gateway-type Vpn --sku VpnGw1 --vpn-type RouteBased --tags "Scenario=S2S" --no-wait
+# CLOUD-VM (WINDOWS)
+az network public-ip create --name "$cloudvm1name-PUBIP" --resource-group $cloudrgname --allocation-method Static --sku Basic
+az network nic create --name "$cloudvm1name-NIC" --vnet-name $cloudvnetname --resource-group $cloudrgname --subnet $cloudmgmtsubnetname --private-ip-address 10.10.1.5 --public-ip-address "$cloudvm1name-PUBIP" --tags "Scenario=S2S"
+az vm create --name $cloudvm1name --resource-group $cloudrgname --image Win2019Datacenter --nics "$cloudvm1name-NIC" --os-disk-name "$cloudvm1name-OS-DISK" --size Standard_B2ms --admin-username $adminusername --admin-password $adminpasswd --tags "Scenario=S2S"  --no-wait
+# CLOUD-VM (LINUX)
+az network public-ip create --name "$cloudvm2name-PUBIP" --resource-group $cloudrgname --allocation-method Static --sku Basic
+az network nic create --name "$cloudvm2name-NIC" --vnet-name $cloudvnetname --resource-group $cloudrgname --subnet $cloudmgmtsubnetname --private-ip-address 10.10.1.6 --public-ip-address "$cloudvm2name-PUBIP" --tags "Scenario=S2S"
+az vm create --name $cloudvm2name --resource-group $cloudrgname --image UbuntuLTS --nics "$cloudvm2name-NIC" --os-disk-name "$cloudvm2name-OS-DISK" --size Standard_B1s --admin-username $adminusername --admin-password $adminpasswd --tags "Scenario=S2S" --no-wait
+
+# ONPREM-VNET
+az network vnet create --resource-group $onpremrgname --name $onpremvnetname --address-prefixes $onpremvnetaddress --subnet-name $onpremlansubnet --subnet-prefixes $onpremlansubnetaddress --tags "Scenario=S2S"
+az network vnet subnet create --address-prefixes $onpremdmzsubnetaddress --name $onpremlansubnetname --resource-group $onpremrgname --vnet-name $onpremvnetname
+#CLOUD-NSG
+az network nsg create --name ONPREM-NSG --resource-group $onpremrgname
+az network nsg rule create --name Allow_SSH --nsg-name ONPREM-NSG --resource-group $onpremrgname --priority 100 --access Allow --protocol Tcp --source-address-prefixes * --destination-address-prefixes * --destination-port-ranges 22
+az network nsg rule create --name Allow_RDP --nsg-name ONPREM-NSG --resource-group $onpremrgname --priority 101 --access Allow --protocol Tcp --source-address-prefixes * --destination-address-prefixes * --destination-port-ranges 3389
+az network vnet subnet update --name $onpremlansubnet --resource-group  $onpremrgname --vnet-name $onpremvnetname --nsg ONPREM-NSG
+
+# ONPREM-GATEWAY VM
+az network public-ip create --name "$onpremgatewayname-PUBIP" --resource-group $onpremrgname --allocation-method Static --sku Basic --tags "Scenario=S2S"
+az network nic create --name "$onpremgatewayname-DMZ-NIC" --vnet-name $onpremvnetname --resource-group $onpremrgname --subnet $onpremlansubnetname --ip-forwarding true --private-ip-address 192.168.0.4 --public-ip-address "$onpremgatewayname-PUBIP" --tags "Scenario=S2S"
+#az network nic create --name "$onpremgatewayname-LAN-NIC" --vnet-name $onpremvnetname --resource-group $onpremrgname --subnet $onpremlansubnet --ip-forwarding true --private-ip-address 192.168.1.4 --tags "Scenario=S2S"
+az vm create --name $onpremgatewayname --resource-group $onpremrgname --image UbuntuLTS --nics "$onpremgatewayname-DMZ-NIC" --os-disk-name "$onpremgatewayname-OS-DISK" --size Standard_B1s --admin-username $adminusername --admin-password $adminpasswd --tags "Scenario=S2S" --no-wait
+# ONPREM-VM (WINDOWS)
+az network public-ip create --name "$onpremvm1name-PUBIP" --resource-group $onpremrgname --allocation-method Static --sku Basic --tags "Scenario=S2S"
+az network nic create --name "$onpremvm1name-NIC" --vnet-name $onpremvnetname --resource-group $onpremrgname --subnet $onpremlansubnet --private-ip-address 192.168.1.5 --public-ip-address "$onpremvm1name-PUBIP" --tags "Scenario=S2S"
+az vm create --name $onpremvm1name --resource-group $onpremrgname --image Win2019Datacenter --nics "$onpremvm1name-NIC" --os-disk-name "$onpremvm1name-OS-DISK" --size Standard_B2ms --admin-username $adminusername --admin-password $adminpasswd --tags "Scenario=S2S" --no-wait
+# ONPREM-VM (Linux)
+az network public-ip create --name "$onpremvm2name-PUBIP" --resource-group $onpremrgname --allocation-method Static --sku Basic --tags "Scenario=S2S"
+az network nic create --name "$onpremvm2name-NIC" --vnet-name $onpremvnetname --resource-group $onpremrgname --subnet $onpremlansubnet --private-ip-address 192.168.1.6 --public-ip-address "$onpremvm2name-PUBIP" --tags "Scenario=S2S"
+az vm create --name $onpremvm2name --resource-group $onpremrgname --image UbuntuLTS --nics "$onpremvm2name-NIC" --os-disk-name "$onpremvm2name-OS-DISK" --size Standard_B1s --admin-username $adminusername --admin-password $adminpasswd --tags "Scenario=S2S" --no-wait
+
+# LOCAL NETWORK GATEWAY
+$onpremsitegwpip = az network nic show --name "$onpremgatewayname-DMZ-NIC" --resource-group $onpremrgname --query "ipConfigurations[].privateIpAddress" --output tsv
+$onpremgwpubip = az network public-ip show --name "$onpremgatewayname-PUBIP" --resource-group $onpremrgname --query ipAddress --output tsv
+$onpremvnetaddr = az network vnet show --name $onpremvnetname --resource-group $onpremrgname --query addressSpace.addressPrefixes --output tsv
+az network local-gateway create --gateway-ip-address $onpremgwpubip --name $onpremgatewayname --resource-group $cloudrgname --local-address-prefixes $onpremvnetaddr --tags "Scenario=S2S" --no-wait
+# ONPREM ROUTE TABLE
+az network route-table create --name ONPREM-ROUTING --resource-group $onpremrgname --tags "Scenario=S2S"
+az network route-table route create --address-prefix $cloudvnetaddress --name TO-CLOUD --resource-group $onpremrgname --next-hop-type VirtualAppliance --route-table-name ONPREM-ROUTING --next-hop-ip-address $onpremsitegwpip
+az network vnet subnet update --vnet-name $onpremvnetname --name $onpremlansubnet --route-table ONPREM-ROUTING --resource-group $onpremrgname
+# Open Firewall on Windows VMs for ICMP
+az vm run-command invoke --command-id RunPowerShellScript --name $onpremvm1name --resource-group $onpremrgname --scripts "Get-NetFirewallRule |Where-Object Name -like 'FPS-*' |Enable-NetFirewallRule"
+az vm run-command invoke --command-id RunPowerShellScript --name $cloudvm1name --resource-group $cloudrgname --scripts "Get-NetFirewallRule |Where-Object Name -like 'FPS-*' |Enable-NetFirewallRule"
+
+# S2S VPN CONNECTION
+az network vpn-connection create --name CLOUD-S2S-ONPREM --resource-group $cloudrgname --vnet-gateway1 $cloudgatewayname --shared-key 'secret123' --local-gateway2 $onpremgatewayname --tags "Scenario=S2S"
